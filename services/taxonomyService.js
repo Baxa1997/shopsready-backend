@@ -844,6 +844,38 @@ const getSmartCandidates = (title) => {
       }
     }
     
+    // STRICT RULE #5: Wooden/Reusable Serving Boards - NUCLEAR PENALTY for disposable
+    // CRITICAL: Wooden/bamboo serving boards are kitchen tools, NOT disposable food service
+    const isReusableServingBoard = (productTitleLower.includes('serving board') ||
+                                     productTitleLower.includes('cutting board') ||
+                                     productTitleLower.includes('charcuterie board') ||
+                                     productTitleLower.includes('cheese board')) &&
+                                    (productTitleLower.includes('wood') ||
+                                     productTitleLower.includes('bamboo') ||
+                                     productTitleLower.includes('acacia') ||
+                                     productTitleLower.includes('teak') ||
+                                     !productTitleLower.includes('disposable'));
+    
+    if (isReusableServingBoard) {
+      // NUCLEAR penalty for disposable/business/industrial categories
+      if (catLower.includes('disposable') ||
+          catLower.includes('food service') ||
+          catLower.includes('business & industrial') ||
+          catLower.includes('restaurant') ||
+          catLower.includes('catering')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // BOOST kitchen & dining categories
+      if (catLower.includes('kitchen') ||
+          catLower.includes('cutting board') ||
+          catLower.includes('serveware') ||
+          catLower.includes('tableware') ||
+          catLower.includes('home & garden')) {
+        scoreMap.set(categoryPath, score * 10); // 10x boost
+      }
+    }
+    
     // ═══════════════════════════════════════════════════════════════════════════
     // END CRITICAL STRICT RULES
     // ═══════════════════════════════════════════════════════════════════════════
