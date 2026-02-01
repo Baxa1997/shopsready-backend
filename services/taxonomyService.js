@@ -521,6 +521,336 @@ const getSmartCandidates = (title) => {
     if (!isOutdoor && catLower.includes('outdoor')) {
       scoreMap.set(categoryPath, score * 0.3); // Heavy penalty - prefer indoor by default
     }
+    
+    // UNIVERSAL PENALTY 12: Therapeutic/Wellness Oils vs Food/Cosmetic Oils
+    // CRITICAL: Prevent essential oils, massage oils, aromatherapy oils from matching food or cosmetics
+    // Examples: "Lavender Essential Oil", "Massage Oil", "Aromatherapy Oil"
+    const isTherapeuticOil = productTitleLower.includes('essential oil') ||
+                             productTitleLower.includes('aromatherapy') ||
+                             productTitleLower.includes('diffuser oil') ||
+                             productTitleLower.includes('massage oil') ||
+                             productTitleLower.includes('carrier oil') ||
+                             productTitleLower.includes('therapeutic oil') ||
+                             (productTitleLower.includes('oil') && 
+                              (productTitleLower.includes('lavender') ||
+                               productTitleLower.includes('eucalyptus') ||
+                               productTitleLower.includes('peppermint') ||
+                               productTitleLower.includes('tea tree') ||
+                               productTitleLower.includes('rosemary') ||
+                               productTitleLower.includes('chamomile')));
+    
+    const isCosmeticOil = productTitleLower.includes('lip oil') ||
+                          productTitleLower.includes('face oil') ||
+                          productTitleLower.includes('hair oil') ||
+                          productTitleLower.includes('body oil') ||
+                          productTitleLower.includes('skin oil');
+    
+    const isCookingOil = productTitleLower.includes('cooking oil') ||
+                         productTitleLower.includes('olive oil') ||
+                         productTitleLower.includes('vegetable oil') ||
+                         productTitleLower.includes('canola oil');
+    
+    if (isTherapeuticOil && !isCosmeticOil && !isCookingOil) {
+      // Extreme penalty for food categories
+      if (catLower.includes('cooking oil') ||
+          catLower.includes('food') ||
+          catLower.includes('baking') ||
+          catLower.includes('beverage') ||
+          catLower.includes('edible')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty
+      }
+      // Extreme penalty for cosmetic categories
+      if (catLower.includes('lip oil') ||
+          catLower.includes('face oil') ||
+          catLower.includes('makeup') ||
+          catLower.includes('cosmetic') ||
+          catLower.includes('nail')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 13: Bicycles vs Exercise Bikes & Electronics
+    // CRITICAL: Prevent road/mountain bikes from matching exercise bikes OR computer/tablet frames
+    // Examples: "Road Bike Frame", "Mountain Bike", "Bicycle Parts"
+    const isRealBike = productTitleLower.includes('road bike') ||
+                       productTitleLower.includes('mountain bike') ||
+                       productTitleLower.includes('bicycle') ||
+                       productTitleLower.includes('bike frame') ||
+                       productTitleLower.includes('cycling');
+    
+    const isExerciseBike = productTitleLower.includes('exercise bike') ||
+                           productTitleLower.includes('stationary bike') ||
+                           productTitleLower.includes('spin bike');
+    
+    if (isRealBike && !isExerciseBike) {
+      // Prevent matching exercise equipment
+      if (catLower.includes('exercise bike') ||
+          catLower.includes('cardio machine') ||
+          catLower.includes('cardio >') ||
+          catLower.includes('fitness equipment')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty
+      }
+      // CRITICAL: Prevent matching computer/tablet/electronics
+      if (catLower.includes('computer') ||
+          catLower.includes('tablet') ||
+          catLower.includes('electronics') ||
+          catLower.includes('phone') ||
+          catLower.includes('laptop')) {
+        scoreMap.set(categoryPath, score * 0.0001); // Ultra extreme penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 14: Furniture Types
+    // Prevent sideboards/cabinets from matching chairs/tables
+    const isFurnitureStorage = productTitleLower.includes('sideboard') ||
+                               productTitleLower.includes('cabinet') ||
+                               productTitleLower.includes('dresser') ||
+                               productTitleLower.includes('armoire') ||
+                               productTitleLower.includes('buffet');
+    
+    if (isFurnitureStorage) {
+      if (catLower.includes('chair') ||
+          catLower.includes('table') ||
+          catLower.includes('desk')) {
+        scoreMap.set(categoryPath, score * 0.1); // Heavy penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 15: Adult vs Children's Athletic Wear
+    // Enhance age detection for athletic/performance wear
+    const isAdultAthletic = (productTitleLower.includes('running') ||
+                             productTitleLower.includes('athletic') ||
+                             productTitleLower.includes('performance') ||
+                             productTitleLower.includes('training')) &&
+                            (productTitleLower.includes('men') ||
+                             productTitleLower.includes('women') ||
+                             productTitleLower.includes('adult') ||
+                             productTitleLower.includes('high-waisted'));
+    
+    if (isAdultAthletic) {
+      if (catLower.includes('boys') ||
+          catLower.includes('girls') ||
+          catLower.includes('kids') ||
+          catLower.includes('children')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 15B: Adult Athletic Underwear
+    // CRITICAL: Prevent adult performance underwear from matching children's underwear
+    // Examples: "Waterproof Running Briefs", "High-Waisted Athletic Shorts"
+    const isAdultUnderwear = (productTitleLower.includes('waterproof') || 
+                              productTitleLower.includes('high-waisted') ||
+                              productTitleLower.includes('performance') ||
+                              productTitleLower.includes('athletic')) &&
+                             (productTitleLower.includes('brief') || 
+                              productTitleLower.includes('underwear') ||
+                              productTitleLower.includes('boxer') ||
+                              productTitleLower.includes('short')) &&
+                             (productTitleLower.includes('running') || 
+                              productTitleLower.includes('training') ||
+                              productTitleLower.includes('sport'));
+    
+    if (isAdultUnderwear) {
+      if (catLower.includes('boys') ||
+          catLower.includes('girls') ||
+          catLower.includes('kids') ||
+          catLower.includes('children') ||
+          catLower.includes('toddler') ||
+          catLower.includes('infant')) {
+        scoreMap.set(categoryPath, score * 0.00001); // Ultra extreme penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 16: Entertainment Equipment
+    // CRITICAL: Prevent karaoke/party equipment from matching professional audio
+    // Examples: "Karaoke Microphone", "Party Speaker"
+    const isEntertainment = productTitleLower.includes('karaoke') ||
+                            productTitleLower.includes('party') ||
+                            productTitleLower.includes('toy') ||
+                            productTitleLower.includes('game');
+    
+    if (isEntertainment) {
+      if (catLower.includes('professional audio') ||
+          catLower.includes('studio equipment') ||
+          catLower.includes('sampler') ||
+          catLower.includes('synthesizer') ||
+          catLower.includes('musical instrument') ||
+          catLower.includes('electronic musical')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty (was 0.01)
+      }
+    }
+    
+    // UNIVERSAL PENALTY 17: Bicycles vs Motorcycles
+    // CRITICAL: Prevent bicycles from matching motorcycles
+    const isBicycle = productTitleLower.includes('bicycle') ||
+                      productTitleLower.includes('bike frame') ||
+                      productTitleLower.includes('road bike') ||
+                      productTitleLower.includes('mountain bike') ||
+                      productTitleLower.includes('cycling');
+    
+    const isMotorcycle = productTitleLower.includes('motorcycle') ||
+                         productTitleLower.includes('motorbike') ||
+                         productTitleLower.includes('motor bike');
+    
+    if (isBicycle && !isMotorcycle) {
+      if (catLower.includes('motorcycle') ||
+          catLower.includes('motor vehicle') ||
+          catLower.includes('motorbike')) {
+        scoreMap.set(categoryPath, score * 0.001); // Extreme penalty
+      }
+    }
+    
+    // UNIVERSAL PENALTY 18: Plumbing Fixtures vs Appliances
+    // Prevent sinks from matching appliances
+    const isPlumbingFixture = productTitleLower.includes('sink') ||
+                              productTitleLower.includes('faucet') ||
+                              productTitleLower.includes('toilet') ||
+                              productTitleLower.includes('bathtub');
+    
+    if (isPlumbingFixture) {
+      if (catLower.includes('appliance') && !catLower.includes('plumbing')) {
+        scoreMap.set(categoryPath, score * 0.2); // Heavy penalty
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRITICAL STRICT RULES - Ultra-Extreme Penalties for Specific Edge Cases
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // CRITICAL: Bike frames must ONLY match cycling/bicycle categories
+    // Enhanced detection to catch various title formats
+    const isRoadBikeFrame = ((productTitleLower.includes('bike frame') ||
+                              productTitleLower.includes('bicycle frame') ||
+                              productTitleLower.includes('road bike') ||
+                              productTitleLower.includes('mountain bike') ||
+                              (productTitleLower.includes('carbon fiber') && productTitleLower.includes('bike')) ||
+                              (productTitleLower.includes('bike') && productTitleLower.includes('frame'))) &&
+                             !productTitleLower.includes('exercise') &&
+                             !productTitleLower.includes('stationary') &&
+                             !productTitleLower.includes('phone case'));
+    
+    if (isRoadBikeFrame) {
+      // NUCLEAR penalty for ANY non-cycling category
+      if (!catLower.includes('cycling') &&
+          !catLower.includes('bicycle') &&
+          !catLower.includes('bike parts') &&
+          !catLower.includes('bikes') &&
+          !catLower.includes('road bike')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // MASSIVE BOOST for cycling categories
+      if (catLower.includes('cycling') || 
+          catLower.includes('bicycle') ||
+          catLower.includes('bike parts') ||
+          catLower.includes('bikes') ||
+          catLower.includes('road bike')) {
+        scoreMap.set(categoryPath, score * 100); // 100x boost (was 10x)
+      }
+    }
+    
+    // STRICT RULE #2: Essential Oils - NUCLEAR PENALTY for food/cosmetics + BOOST health
+    // CRITICAL: Essential oils must avoid food and cosmetics, prefer health & beauty
+    const isEssentialOilProduct = (productTitleLower.includes('essential oil') ||
+                                   (productTitleLower.includes('oil') && 
+                                    productTitleLower.includes('aromatherapy'))) &&
+                                  !productTitleLower.includes('cooking') &&
+                                  !productTitleLower.includes('olive') &&
+                                  !productTitleLower.includes('lip') &&
+                                  !productTitleLower.includes('face');
+    
+    if (isEssentialOilProduct) {
+      // NUCLEAR penalty for food categories
+      if (catLower.includes('food') ||
+          catLower.includes('cooking') ||
+          catLower.includes('baking') ||
+          catLower.includes('beverage') ||
+          catLower.includes('edible') ||
+          catLower.includes('tobacco')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // NUCLEAR penalty for ALL cosmetic categories (including lip oils!)
+      if (catLower.includes('makeup') ||
+          catLower.includes('cosmetic') ||
+          catLower.includes('lip') ||
+          catLower.includes('nail') ||
+          catLower.includes('face oil') ||
+          catLower.includes('hair oil') ||
+          catLower.includes('skin care')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // NO BOOST - let natural scoring work
+      // (Boost was causing lip oils to win because they're in "Health & Beauty")
+    }
+    
+    // STRICT RULE #3: Adult Athletic Underwear - NUCLEAR PENALTY for children's
+    // CRITICAL: Waterproof/performance underwear is NEVER for children
+    const isAdultPerformanceUnderwear = (productTitleLower.includes('waterproof') ||
+                                         productTitleLower.includes('performance') ||
+                                         productTitleLower.includes('high-waisted')) &&
+                                        (productTitleLower.includes('brief') ||
+                                         productTitleLower.includes('underwear') ||
+                                         productTitleLower.includes('boxer')) &&
+                                        (productTitleLower.includes('running') ||
+                                         productTitleLower.includes('athletic') ||
+                                         productTitleLower.includes('sport') ||
+                                         productTitleLower.includes('training'));
+    
+    if (isAdultPerformanceUnderwear) {
+      // NUCLEAR penalty for ANY children's category
+      if (catLower.includes('boys') ||
+          catLower.includes('girls') ||
+          catLower.includes('kids') ||
+          catLower.includes('children') ||
+          catLower.includes('toddler') ||
+          catLower.includes('infant') ||
+          catLower.includes('baby')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // BOOST adult underwear categories
+      if ((catLower.includes('men') || catLower.includes('women')) &&
+          (catLower.includes('underwear') || catLower.includes('undergarment'))) {
+        scoreMap.set(categoryPath, score * 10); // 10x boost
+      }
+    }
+    
+    // STRICT RULE #4: Microphone Accessories - NUCLEAR PENALTY for exercise equipment
+    // CRITICAL: Microphone foam covers are AUDIO accessories, not fitness equipment
+    const isMicrophoneAccessory = productTitleLower.includes('microphone') &&
+                                   (productTitleLower.includes('foam') ||
+                                    productTitleLower.includes('cover') ||
+                                    productTitleLower.includes('windscreen'));
+    
+    if (isMicrophoneAccessory) {
+      // NUCLEAR penalty for sporting goods/fitness categories
+      if (catLower.includes('sporting') ||
+          catLower.includes('fitness') ||
+          catLower.includes('exercise') ||
+          catLower.includes('foam roller') ||
+          catLower.includes('yoga') ||
+          catLower.includes('gym')) {
+        scoreMap.set(categoryPath, score * 0.000001); // Nuclear penalty
+      }
+      
+      // BOOST audio/microphone categories
+      if (catLower.includes('audio') ||
+          catLower.includes('microphone') ||
+          catLower.includes('electronics')) {
+        scoreMap.set(categoryPath, score * 10); // 10x boost
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // END CRITICAL STRICT RULES
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // UNIVERSAL PENALTY 19: Essential Oils vs Cooking Oils (DEPRECATED - merged into #12)
+    // This penalty is now handled by UNIVERSAL PENALTY 12 and STRICT RULE #2
+    // Keeping this comment for reference
   });
 
   // Convert to array and sort by score
