@@ -1,10 +1,8 @@
 const express = require('express');
-const router = express.Router(); // Correctly initialized
+const router = express.Router();
 const { groupProducts } = require('../services/taxonomyService');
 
-/**
- * ROUTE: Identify a single product category
- */
+
 router.post('/identify', async (req, res) => {
   const { title, shopId } = req.body;
   const targetShop = shopId || req.headers['x-shop-id'] || 'default';
@@ -14,7 +12,6 @@ router.post('/identify', async (req, res) => {
   }
 
   try {
-    // Re-use the optimized grouping logic even for single items to ensure consistency
     const result = await groupProducts([{ title }], targetShop);
     res.json({
       success: true,
