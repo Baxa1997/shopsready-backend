@@ -2,6 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { groupProducts } = require('../services/taxonomyService');
 
+// Belt-and-suspenders: set CORS headers on every response from this router.
+// This covers cases where cPanel's Apache proxy drops the global middleware headers.
+router.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-shop-id');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);   // respond to preflight immediately
+  }
+  next();
+});
 
 router.post('/identify', async (req, res) => {
   const { title, shopId } = req.body;

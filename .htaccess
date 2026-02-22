@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS — Set headers at the Apache level so they are present even when
+# cPanel's proxy intercepts OPTIONS preflight before Node.js sees it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, x-shop-id"
+Header always set Access-Control-Max-Age "86400"
+
+# Respond immediately to preflight OPTIONS requests — do NOT forward them
+# to Node.js (Passenger). Apache handles them here with a 204.
+RewriteEngine On
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=204,L]

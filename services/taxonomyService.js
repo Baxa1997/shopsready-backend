@@ -33,10 +33,17 @@ const STOP_WORDS = new Set([
   'and', 'or', 'the', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of'
 ]);
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(
-  process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY
-);
+// Lazy Gemini AI client — created on first use, NOT at module load.
+// This prevents a startup crash when the API key env var isn't set yet.
+let _genAI = null;
+function getGenAI() {
+  if (!_genAI) {
+    const apiKey = process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Missing API key: set OPENAI_API_KEY or GEMINI_API_KEY');
+    _genAI = new GoogleGenerativeAI(apiKey);
+  }
+  return _genAI;
+}
 
 // ============================================================================
 // HELPER: ROBUST JSON PARSER
@@ -1015,7 +1022,7 @@ When in doubt, suggest a BROADER category rather than inventing specific subcate
 Now translate and suggest categories for these products:`;
 
   try {
-    const model = genAI.getGenerativeModel({
+    const model = getGenAI().getGenerativeModel({
       model: CONFIG.AI_MODEL,
       generationConfig: {
         responseMimeType: "application/json"
