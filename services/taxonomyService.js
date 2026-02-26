@@ -7,8 +7,9 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 // CONFIGURATION
 // ============================================================================
 const CONFIG = {
-  BATCH_SIZE: 15,
-  AI_MODEL: "gemini-2.5-flash",
+  BATCH_SIZE: 40,
+  MAX_PARALLEL_BATCHES: 3,
+  AI_MODEL: "gemini-3-flash-preview",
   TAXONOMY_PATH: path.join(__dirname, '..', 'data', 'categories.json'),
   MIN_WORD_LENGTH: 3,
   MAX_CANDIDATES: 15,
@@ -1058,152 +1059,118 @@ Now translate and suggest categories for these products:`;
  * @param {string} shopId - Shop identifier for handle generation
  * @returns {Array} Array of grouped products with categories
  */
-const groupProducts = async (products, shopId = 'default') => {
-  if (!Array.isArray(products) || products.length === 0) {
-    console.warn('⚠️  No products to process');
-    return [];
-  }
-
-  console.log(`\n🚀 Starting Translate-Then-Search categorization for ${products.length} products...`);
-  const startTime = Date.now();
-
+// ============================================================================
+// HELPER: Process a single batch (shared by both groupProducts & streaming)
+// ============================================================================
+const processBatch = (batch, aiTranslations) => {
   const results = [];
 
-  // Process in batches
-  for (let i = 0; i < products.length; i += CONFIG.BATCH_SIZE) {
-    const batch = products.slice(i, i + CONFIG.BATCH_SIZE);
-    console.log(`\n📦 Processing batch ${Math.floor(i / CONFIG.BATCH_SIZE) + 1} (${batch.length} products)...`);
+  batch.forEach((product, batchIndex) => {
+    const uid = `PROD_${batchIndex}`;
+    const aiData = aiTranslations[uid];
 
-    // STEP 1: AI Translation & Suggestion (1 call for entire batch)
-    const aiTranslations = await translateAndSuggest(batch);
+    const result = {
+      title: product.title || 'Untitled Product',
+      refined_title: product.title || 'Untitled Product',
+      category: 'General Marketplace',
+      google_product_category: null,
+      description: product.description || '',
+      method: 'UNKNOWN',
+      variants: product.variants || [],
+      sku: product.sku,
+      price: product.price
+    };
 
-    // STEP 2: Process each product in the batch
-    batch.forEach((product, batchIndex) => {
-      const uid = `PROD_${batchIndex}`;
-      const aiData = aiTranslations[uid];
+    // Apply AI enrichment if available
+    if (aiData) {
+      result.refined_title = aiData.refined_title || result.title;
+      result.description = aiData.description || result.description;
 
-      const result = {
-        title: product.title || 'Untitled Product',
-        refined_title: product.title || 'Untitled Product',
-        category: 'General Marketplace',
-        google_product_category: null,
-        description: product.description || '',
-        method: 'UNKNOWN',
-        variants: product.variants || [],
-        sku: product.sku,
-        price: product.price
-      };
+      const translatedKeywords = aiData.taxonomy_keywords || [];
+      const searchQuery = translatedKeywords.join(' ');
 
-      // Apply AI enrichment if available
-      if (aiData) {
-        result.refined_title = aiData.refined_title || result.title;
-        result.description = aiData.description || result.description;
+      // Get keyword candidates using AI's translated terms
+      const keywordCandidates = getSmartCandidates(searchQuery);
+      // Also get candidates from original title for fallback
+      const originalCandidates = getSmartCandidates(product.title);
 
-        // STEP 3: Validate AI suggestion with keyword search
-        // Search using AI's translated taxonomy keywords
-        const translatedKeywords = aiData.taxonomy_keywords || [];
-        const searchQuery = translatedKeywords.join(' ');
-        
-        console.log(`  🔍 AI Translation: "${aiData.product_type}" → [${translatedKeywords.join(', ')}]`);
-        if (aiData.suggested_category) {
-          console.log(`  🎯 AI Suggested Category: "${aiData.suggested_category}"`);
-        }
-        
-        // Get keyword candidates using AI's translated terms
-        const keywordCandidates = getSmartCandidates(searchQuery);
-        
-        // Also get candidates from original title for fallback
-        const originalCandidates = getSmartCandidates(product.title);
+      // AI suggestion matching
+      const aiSuggestion = aiData.suggested_category;
+      let aiSuggestionMatch = null;
 
-        // STEP 4: 100% AI-First Decision Logic
-        // Trust the AI's suggestion completely if it exists in taxonomy
-        const aiSuggestion = aiData.suggested_category;
-        
-        // Try matching strategies for AI's suggestion
-        let aiSuggestionMatch = null;
-        
-        if (aiSuggestion) {
-          const suggestionLower = aiSuggestion.toLowerCase().trim();
-          
-          // Strategy 1: Exact match
-          aiSuggestionMatch = officialTaxonomyMap.get(suggestionLower);
-          
-          // Strategy 2: Normalize & to "and" (common variation)
-          if (!aiSuggestionMatch) {
-            const normalized = suggestionLower.replace(/\s*&\s*/g, ' & ');
-            aiSuggestionMatch = officialTaxonomyMap.get(normalized);
-          }
-        }
-        
-        if (aiSuggestionMatch) {
-          // ✅ AI suggested a valid category - TRUST IT COMPLETELY!
-          result.category = aiSuggestionMatch.path;
-          result.google_product_category = aiSuggestionMatch.id;
-          result.method = 'AI_TRANSLATION_VERIFIED';
-          console.log(`  ✓ ${result.title.substring(0, 40)} → ${aiSuggestionMatch.path} (AI verified)`);
-          
-        } else if (keywordCandidates.length > 0) {
-          // AI suggestion not found or invalid, use keyword search with translated terms
-          const topCandidate = keywordCandidates[0];
-          
-          if (topCandidate.score >= CONFIG.AUTO_ACCEPT_SCORE) {
-            result.category = topCandidate.path;
-            result.google_product_category = topCandidate.id;
-            result.method = `TRANSLATED_KEYWORD_MATCH (score: ${topCandidate.score})`;
-            console.log(`  ✓ ${result.title.substring(0, 40)} → ${topCandidate.path} (translated keywords)`);
-          } else {
-            result.category = topCandidate.path;
-            result.google_product_category = topCandidate.id;
-            result.method = `TRANSLATED_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
-            console.log(`  ⚠ ${result.title.substring(0, 40)} → ${topCandidate.path} (low confidence)`);
-          }
-          
-        } else if (originalCandidates.length > 0) {
-          // Fallback to original title search
-          const topCandidate = originalCandidates[0];
-          
-          if (topCandidate.score >= CONFIG.AUTO_ACCEPT_SCORE) {
-            result.category = topCandidate.path;
-            result.google_product_category = topCandidate.id;
-            result.method = `ORIGINAL_KEYWORD_MATCH (score: ${topCandidate.score})`;
-            console.log(`  ✓ ${result.title.substring(0, 40)} → ${topCandidate.path} (original keywords)`);
-          } else {
-            result.category = topCandidate.path;
-            result.google_product_category = topCandidate.id;
-            result.method = `ORIGINAL_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
-            console.log(`  ⚠ ${result.title.substring(0, 40)} → ${topCandidate.path} (original fallback)`);
-          }
-          
-        } else {
-          // Complete failure - no candidates found
-          result.method = 'NO_CANDIDATES_FOUND';
-          console.log(`  ✗ ${result.title.substring(0, 40)} → No candidates`);
-        }
-        
-      } else {
-        // AI failed completely - fallback to original keyword search
-        const originalCandidates = getSmartCandidates(product.title);
-        
-        if (originalCandidates.length > 0) {
-          const topCandidate = originalCandidates[0];
-          result.category = topCandidate.path;
-          result.google_product_category = topCandidate.id;
-          result.method = `AI_FAILED_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
-          console.log(`  ⚠ ${result.title.substring(0, 40)} → ${topCandidate.path} (AI failed)`);
-        } else {
-          result.method = 'COMPLETE_FAILURE';
-          console.log(`  ✗ ${result.title.substring(0, 40)} → Complete failure`);
+      if (aiSuggestion) {
+        const suggestionLower = aiSuggestion.toLowerCase().trim();
+        aiSuggestionMatch = officialTaxonomyMap.get(suggestionLower);
+        if (!aiSuggestionMatch) {
+          const normalized = suggestionLower.replace(/\s*&\s*/g, ' & ');
+          aiSuggestionMatch = officialTaxonomyMap.get(normalized);
         }
       }
 
-      results.push(result);
-    });
-  }
+      if (aiSuggestionMatch) {
+        result.category = aiSuggestionMatch.path;
+        result.google_product_category = aiSuggestionMatch.id;
+        result.method = 'AI_TRANSLATION_VERIFIED';
+      } else if (keywordCandidates.length > 0) {
+        const topCandidate = keywordCandidates[0];
+        result.category = topCandidate.path;
+        result.google_product_category = topCandidate.id;
+        result.method = topCandidate.score >= CONFIG.AUTO_ACCEPT_SCORE
+          ? `TRANSLATED_KEYWORD_MATCH (score: ${topCandidate.score})`
+          : `TRANSLATED_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
+      } else if (originalCandidates.length > 0) {
+        const topCandidate = originalCandidates[0];
+        result.category = topCandidate.path;
+        result.google_product_category = topCandidate.id;
+        result.method = topCandidate.score >= CONFIG.AUTO_ACCEPT_SCORE
+          ? `ORIGINAL_KEYWORD_MATCH (score: ${topCandidate.score})`
+          : `ORIGINAL_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
+      } else {
+        result.method = 'NO_CANDIDATES_FOUND';
+      }
+    } else {
+      // AI failed completely - fallback to original keyword search
+      const originalCandidates = getSmartCandidates(product.title);
+      if (originalCandidates.length > 0) {
+        const topCandidate = originalCandidates[0];
+        result.category = topCandidate.path;
+        result.google_product_category = topCandidate.id;
+        result.method = `AI_FAILED_KEYWORD_FALLBACK (score: ${topCandidate.score})`;
+      } else {
+        result.method = 'COMPLETE_FAILURE';
+      }
+    }
 
-  const endTime = Date.now();
-  const duration = ((endTime - startTime) / 1000).toFixed(2);
+    results.push(result);
+  });
 
-  // Summary statistics
+  return results;
+};
+
+// ============================================================================
+// HELPER: Run promises with a concurrency limit
+// ============================================================================
+const parallelLimit = async (tasks, limit) => {
+  const results = [];
+  let index = 0;
+
+  const runner = async () => {
+    while (index < tasks.length) {
+      const i = index++;
+      results[i] = await tasks[i]();
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runner());
+  await Promise.all(workers);
+  return results;
+};
+
+// ============================================================================
+// HELPER: Log summary stats
+// ============================================================================
+const logSummary = (results, startTime) => {
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   const stats = {
     total: results.length,
     aiTranslated: results.filter(r => r.method.startsWith('AI_TRANSLATION')).length,
@@ -1220,7 +1187,106 @@ const groupProducts = async (products, shopId = 'default') => {
   console.log(`   - Original Keyword Match: ${stats.originalKeyword} (${((stats.originalKeyword / stats.total) * 100).toFixed(1)}%)`);
   console.log(`   - Failed: ${stats.failed} (${((stats.failed / stats.total) * 100).toFixed(1)}%)`);
 
+  return { stats, duration };
+};
+
+// ============================================================================
+// MAIN EXPORT: GROUP PRODUCTS (Parallel Batches)
+// ============================================================================
+/**
+ * Main function: Translates product titles with AI, then validates with keyword search.
+ * Batches are processed in PARALLEL (up to MAX_PARALLEL_BATCHES at a time).
+ * @param {Array} products - Array of product objects with title, sku, price, etc.
+ * @param {string} shopId - Shop identifier for handle generation
+ * @returns {Array} Array of grouped products with categories
+ */
+const groupProducts = async (products, shopId = 'default') => {
+  if (!Array.isArray(products) || products.length === 0) {
+    console.warn('⚠️  No products to process');
+    return [];
+  }
+
+  console.log(`\n🚀 Starting PARALLEL categorization for ${products.length} products (batch size: ${CONFIG.BATCH_SIZE}, concurrency: ${CONFIG.MAX_PARALLEL_BATCHES})...`);
+  const startTime = Date.now();
+
+  // Split products into batches
+  const batches = [];
+  for (let i = 0; i < products.length; i += CONFIG.BATCH_SIZE) {
+    batches.push(products.slice(i, i + CONFIG.BATCH_SIZE));
+  }
+
+  console.log(`📦 Total batches: ${batches.length}`);
+
+  // Create tasks for each batch
+  const tasks = batches.map((batch, batchIdx) => async () => {
+    console.log(`  🔄 Batch ${batchIdx + 1}/${batches.length} (${batch.length} products) — sending to AI...`);
+    const aiTranslations = await translateAndSuggest(batch);
+    const batchResults = processBatch(batch, aiTranslations);
+    console.log(`  ✅ Batch ${batchIdx + 1}/${batches.length} done`);
+    return batchResults;
+  });
+
+  // Process batches in parallel with concurrency limit
+  const batchResults = await parallelLimit(tasks, CONFIG.MAX_PARALLEL_BATCHES);
+  const results = batchResults.flat();
+
+  logSummary(results, startTime);
   return results;
+};
+
+// ============================================================================
+// STREAMING EXPORT: GROUP PRODUCTS WITH SSE PROGRESS
+// ============================================================================
+/**
+ * Streaming version: processes batches in parallel and calls onBatch() after
+ * each batch finishes so the route can stream progress to the client.
+ * @param {Array} products
+ * @param {string} shopId
+ * @param {Function} onBatch - callback(batchResults, progress) called per batch
+ * @returns {Array} Final combined results
+ */
+const groupProductsStream = async (products, shopId = 'default', onBatch = () => {}) => {
+  if (!Array.isArray(products) || products.length === 0) {
+    return [];
+  }
+
+  const startTime = Date.now();
+
+  // Split products into batches
+  const batches = [];
+  for (let i = 0; i < products.length; i += CONFIG.BATCH_SIZE) {
+    batches.push(products.slice(i, i + CONFIG.BATCH_SIZE));
+  }
+
+  const totalBatches = batches.length;
+  const allResults = [];
+  let completedBatches = 0;
+
+  // Create tasks for each batch
+  const tasks = batches.map((batch, batchIdx) => async () => {
+    const aiTranslations = await translateAndSuggest(batch);
+    const batchResults = processBatch(batch, aiTranslations);
+
+    completedBatches++;
+    allResults.push(...batchResults);
+
+    // Notify caller about progress
+    onBatch(batchResults, {
+      batchNumber: batchIdx + 1,
+      totalBatches,
+      completedBatches,
+      processedProducts: allResults.length,
+      totalProducts: products.length,
+      percent: Math.round((allResults.length / products.length) * 100)
+    });
+
+    return batchResults;
+  });
+
+  await parallelLimit(tasks, CONFIG.MAX_PARALLEL_BATCHES);
+
+  logSummary(allResults, startTime);
+  return allResults;
 };
 
 // ============================================================================
@@ -1228,12 +1294,14 @@ const groupProducts = async (products, shopId = 'default') => {
 // ============================================================================
 module.exports = {
   groupProducts,
+  groupProductsStream,
   cleanAndParseJSON,
   // Export for testing
   _internal: {
     loadTaxonomy,
     getSmartCandidates,
     translateAndSuggest,
+    processBatch,
     tokenize,
     keywordIndex,
     officialTaxonomyMap,

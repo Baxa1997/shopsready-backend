@@ -32,8 +32,9 @@ function getSupabase() {
 // ── Map frontend plan names → Stripe Price IDs ──────────────────────────────
 function getPriceMap() {
   return {
-    pay_per_use: process.env.STRIPE_PRICE_PAY_PER_USE,
-    pro_monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
+    standard: process.env.STRIPE_PRICE_STANDARD,
+    pro:      process.env.STRIPE_PRICE_PRO,
+    ultra:    process.env.STRIPE_PRICE_ULTRA,
   };
 }
 
@@ -52,8 +53,9 @@ router.post('/checkout', express.json(), async (req, res) => {
 
     // ── STEP 2: Check env vars are set ────────────────────────────────────
     console.log('[Stripe /checkout] STRIPE_SECRET_KEY set?', !!process.env.STRIPE_SECRET_KEY);
-    console.log('[Stripe /checkout] STRIPE_PRICE_PAY_PER_USE:', process.env.STRIPE_PRICE_PAY_PER_USE);
-    console.log('[Stripe /checkout] STRIPE_PRICE_PRO_MONTHLY:', process.env.STRIPE_PRICE_PRO_MONTHLY);
+    console.log('[Stripe /checkout] STRIPE_PRICE_STANDARD:', process.env.STRIPE_PRICE_STANDARD);
+    console.log('[Stripe /checkout] STRIPE_PRICE_PRO:', process.env.STRIPE_PRICE_PRO);
+    console.log('[Stripe /checkout] STRIPE_PRICE_ULTRA:', process.env.STRIPE_PRICE_ULTRA);
     console.log('[Stripe /checkout] FRONTEND_URL:', process.env.FRONTEND_URL);
 
     // ── STEP 3: Resolve price ID ──────────────────────────────────────────
@@ -64,12 +66,12 @@ router.post('/checkout', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'Missing required field: plan' });
     }
     if (!priceId) {
-      return res.status(400).json({ error: `Unknown plan "${plan}". Valid values: "pro_monthly", "pay_per_use"` });
+      return res.status(400).json({ error: `Unknown plan "${plan}". Valid values: "standard", "pro", "ultra"` });
     }
 
     // ── STEP 4: Call Stripe ───────────────────────────────────────────────
     const stripe = getStripe();
-    const isRecurring = plan === 'pro_monthly';
+    const isRecurring = plan === 'ultra'; // Only ultra is a recurring subscription
 
     // Validate FRONTEND_URL
     let frontendUrl = (process.env.FRONTEND_URL || '').trim();
@@ -102,8 +104,9 @@ router.post('/checkout', express.json(), async (req, res) => {
       diagnostics: {
         hasStripeKey: !!process.env.STRIPE_SECRET_KEY,
         frontendUrl: process.env.FRONTEND_URL || 'MISSING',
-        payPerUsePrice: process.env.STRIPE_PRICE_PAY_PER_USE ? 'SET' : 'MISSING',
-        proMonthlyPrice: process.env.STRIPE_PRICE_PRO_MONTHLY ? 'SET' : 'MISSING'
+        standardPrice: process.env.STRIPE_PRICE_STANDARD ? 'SET' : 'MISSING',
+        proPrice: process.env.STRIPE_PRICE_PRO ? 'SET' : 'MISSING',
+        ultraPrice: process.env.STRIPE_PRICE_ULTRA ? 'SET' : 'MISSING'
       }
     });
   }
@@ -140,15 +143,15 @@ router.post(
         const email = session.customer_email || session.metadata?.email;
         const plan  = session.metadata?.plan;
 
-        if (email && plan === 'pay_per_use') {
+        if (email && plan) {
           const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
           const user = users.find(u => u.email === email);
           if (user) {
             const { error } = await supabaseAdmin
               .from('profiles')
-              .update({ daily_generation_count: 0 })
+              .update({ plan, daily_generation_count: 0 })
               .eq('id', user.id);
-            if (error) console.error('Supabase update error (pay_per_use):', error.message);
+            if (error) console.error('Supabase update error (checkout.session.completed):', error.message);
           }
         }
         break;
@@ -166,10 +169,12 @@ router.post(
           const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
           const user = users.find(u => u.email === email);
           if (user) {
+            // Determine the plan name from the subscription's metadata
+            const subPlan = subscription.metadata?.plan || 'standard';
             const { error } = await supabaseAdmin
               .from('profiles')
               .update({
-                plan:                   status === 'active' ? 'pro' : 'free',
+                plan:                   status === 'active' ? subPlan : 'free',
                 subscription_status:    status,
                 stripe_customer_id:     customerId,
                 stripe_subscription_id: subscription.id,

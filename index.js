@@ -37,6 +37,11 @@ app.get('/', (req, res) => {
   res.send('🚀 ShopsReady API is RUNNING! (Routes loaded)');
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Increase keep-alive and headers timeout to 10 min so bulk requests
+// (200+ products) don't get killed by Node.js before they finish.
+server.keepAliveTimeout = 600_000;    // 10 min
+server.headersTimeout = 610_000;      // slightly more than keepAliveTimeout
